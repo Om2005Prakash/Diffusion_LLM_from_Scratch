@@ -1,5 +1,3 @@
-%%writefile finetune_sft.py
-
 import os
 import argparse
 import torch
@@ -178,7 +176,7 @@ def seed_everything(seed: int):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
     
-seed_everything(42)
+seed_everything(args.seed)
 
 args = parse_args()
 
@@ -202,7 +200,7 @@ tokenizer = get_tokenizer(args.hf_model_name)
 model = AutoModelForMaskedLM.from_pretrained(args.hf_model_name)
 model.resize_token_embeddings(len(tokenizer))
 state_dict = load_file(args.path_to_pretrained_checkpoint, device="cpu")
-# model = torch.compile(model)
+model = torch.compile(model)
 
 model.load_state_dict(state_dict, strict=False)
 # model.tie_weights()
@@ -219,12 +217,14 @@ tokenized_data = load_from_disk(args.path_to_prepped_data)
 train_dataloader = DataLoader(tokenized_data["train"],
                             batch_size=batch_size,
                             shuffle=True,
-                            collate_fn=SFTCollator(args.hf_model_name))
+                            collate_fn=SFTCollator(args.hf_model_name),
+                            drop_last=True)
 
 eval_dataloader = DataLoader(tokenized_data["test"],
                             batch_size=batch_size,
                             shuffle=False,
-                            collate_fn=SFTCollator(args.hf_model_name))
+                            collate_fn=SFTCollator(args.hf_model_name),
+                            drop_last=True)
 
 # Optimizer
 optimizer = torch.optim.AdamW(
@@ -320,7 +320,9 @@ while train:
 
             for batch in tqdm(eval_dataloader, desc="Evaluating", disable=not accelerator.is_local_main_process):
                 with torch.no_grad():
+
                     input_ids = batch["input_ids"]
+                    query_mask = batch["query_mask"]
 
                     # Attend to every token (EOS also)
                     batch_size, seq_len = input_ids.size()
@@ -331,22 +333,31 @@ while train:
                     t = t.expand(batch_size, seq_len).clamp_min(1e-5)
                     mask = torch.bernoulli(t).bool()
 
+                    mask = mask * query_mask
+                    mask = mask.bool()
+
                     # Mask Data and Don't Compute Loss for Unmasked Data
                     masked_input_ids = input_ids.masked_fill(mask, tokenizer.mask_token_id)
                     labels = input_ids.masked_fill(~mask, -100)
 
                     # Compute logits
-                    logits = model(input_ids=masked_input_ids,
-                                attention_mask=attention_mask)["logits"]
-                    
-                    # Compute loss
-                    num_classes = logits.size(-1)
-                    loss = loss_func(logits.view(batch_size * seq_len, num_classes),
-                                    labels.flatten())
+                    with accelerator.accumulate(model):
+                        logits = model(input_ids=masked_input_ids,
+                                    attention_mask=attention_mask)["logits"]
+                        
+                        # Compute loss
+                        num_classes = logits.size(-1)
+                        loss = loss_func(logits.view(batch_size * seq_len, num_classes),
+                                        labels.flatten())
 
-                    # Scale loss by t
-                    loss = loss.reshape(batch_size, seq_len) / t
-                    loss = loss.mean()
+                        # Scale loss by t
+                        loss = loss.reshape(batch_size, seq_len) / t
+
+                        answer_lengths = query_mask.sum(dim=1, keepdim=True)
+                        answer_lengths = torch.clamp(answer_lengths, min=1)
+                        loss = loss / answer_lengths
+
+                        loss = loss.sum(dim=1).mean()
 
                     log["eval_loss"] += loss.item()
                     eval_steps += 1

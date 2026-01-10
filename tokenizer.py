@@ -1,5 +1,3 @@
-%%writefile tokenizer.py
-
 from tokenizers.processors import TemplateProcessing
 from transformers import AutoTokenizer
 

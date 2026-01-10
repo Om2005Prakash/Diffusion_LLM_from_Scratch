@@ -1,5 +1,3 @@
-%%writefile data_utils.py
-
 import torch
 from datasets import load_from_disk
 from torch.utils.data import DataLoader

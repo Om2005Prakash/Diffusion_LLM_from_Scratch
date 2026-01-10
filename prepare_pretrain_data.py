@@ -1,5 +1,3 @@
-%%writefile prepare_pretrain_data.py
-
 from datasets import load_dataset, load_from_disk, concatenate_datasets
 import time
 import argparse
