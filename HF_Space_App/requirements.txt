@@ -1,0 +1,6 @@
+gradio
+torch
+transformers
+safetensors
+rich
+accelerate
