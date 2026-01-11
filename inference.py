@@ -145,9 +145,9 @@ def inference(tokenizer,
                     input_tokens[mask] = tokenizer.mask_token_id
 
                     n_corrector_steps = 1
-                    corrector_step_size = (t-s)/(1-s)
+                    corrector_step_size = 0.5 * (t-s)/(1-s)
 
-                    if n_corrector_steps > 0 and s > 0:
+                    if n_corrector_steps > 0 and s > 0.3:
                         for _ in range(n_corrector_steps):
                             known_mask = ~mask ^ ~original_mask
                             noise_rng = torch.rand_like(known_mask, dtype=torch.float, device=device)
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     parser.add_argument("--prompt", type=str, default=None)
     parser.add_argument("--seq_len", type=int, default=512)
     parser.add_argument("--num_steps", type=int, default=512)
-    parser.add_argument("--strategy", type=str, default="random", choices=["backward", "predictor_corrector"])
+    parser.add_argument("--strategy", type=str, default="predictor_corrector", choices=["backward", "predictor_corrector"])
     parser.add_argument("--hf_model_name", type=str, default="distilbert/distilroberta-base")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--seed", type=int, default=1234)

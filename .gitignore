@@ -1,3 +1,4 @@
 *.pyc
 __py_cache__
-model.safetensors
+*.safetensors
+*.pt
